@@ -40,16 +40,16 @@ func (p *Pool) Push(task f) error {
 	return nil
 }
 
-func (p *Pool) Running() int32 {
-	return atomic.LoadInt32(&p.running)
+func (p *Pool) Running() int {
+	return int(atomic.LoadInt32(&p.running))
 }
 
-func (p *Pool) Free() int32 {
-	return atomic.LoadInt32(&p.capacity) - atomic.LoadInt32(&p.running)
+func (p *Pool) Free() int {
+	return int(atomic.LoadInt32(&p.capacity) - atomic.LoadInt32(&p.running))
 }
 
-func (p *Pool) Cap() int32 {
-	return atomic.LoadInt32(&p.capacity)
+func (p *Pool) Cap() int {
+	return int(atomic.LoadInt32(&p.capacity))
 }
 
 func (p *Pool) Destroy() error {
@@ -88,18 +88,20 @@ func (p *Pool) newWorker() *Worker {
 		exit:  make(chan sig),
 	}
 	worker.Run()
-	atomic.AddInt32(&p.running, 1)
 	return worker
 }
 
 func (p *Pool) getWorker() *Worker {
+	defer atomic.AddInt32(&p.running, 1)
 	var worker *Worker
-	if !p.reachLimit() {
-		return p.newWorker()
+	if p.reachLimit() {
+		return <-p.workers
 	}
 
 	select {
 	case worker = <-p.workers:
 		return worker
+	default:
+		return p.newWorker()
 	}
 }

@@ -1,20 +1,52 @@
-package jant
+package jant_test
 
 import (
-	"github.com/stretchr/testify/assert"
+	"github.com/caser789/jant"
+	"runtime"
 	"testing"
 )
 
-func TestPush(t *testing.T) {
-	Push(func() {})
-	Push(func() {})
-	// assert.Equal(t, len(defaultPool.tasks), 2)
+var n = 100000
+
+func demoFunc() {
+	for i := 0; i < 10000000; i++ {
+	}
 }
 
-func TestSize(t *testing.T) {
-	assert.Equal(t, int(defaultPool.Running()), Size())
+func TestDefaultPool(t *testing.T) {
+	for i := 0; i < n; i++ {
+		jant.Push(demoFunc)
+	}
+
+	t.Logf("pool capacity:%d", jant.Cap())
+	t.Logf("running workers:%d", jant.Running())
+	t.Logf("free workers:%d", jant.Free())
+
+	mem := runtime.MemStats{}
+	runtime.ReadMemStats(&mem)
+	t.Logf("memory usage:%d", mem.TotalAlloc/1024)
 }
 
-func TestCapacity(t *testing.T) {
-	assert.Equal(t, int(defaultPool.Cap()), Cap())
+func TestNoPool(t *testing.T) {
+	for i := 0; i < n; i++ {
+		go demoFunc()
+	}
+
+	mem := runtime.MemStats{}
+	runtime.ReadMemStats(&mem)
+	t.Logf("memory usage:%d", mem.TotalAlloc/1024)
+}
+
+func TestCustomPool(t *testing.T) {
+	p := jant.NewPool(1000, 100)
+	for i := 0; i < n; i++ {
+		p.Push(demoFunc)
+	}
+
+	t.Logf("pool capacity:%d", p.Cap())
+	t.Logf("running workers number:%d", p.Running())
+	t.Logf("free workers number:%d", p.Free())
+
+	mem := runtime.MemStats{}
+	runtime.ReadMemStats(&mem)
 }

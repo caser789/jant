@@ -13,10 +13,14 @@ func Push(task f) error {
 	return defaultPool.Push(task)
 }
 
-func Size() int {
-	return int(defaultPool.Running())
+func Running() int {
+	return defaultPool.Running()
 }
 
 func Cap() int {
-	return int(defaultPool.Cap())
+	return defaultPool.Cap()
+}
+
+func Free() int {
+	return defaultPool.Free()
 }
