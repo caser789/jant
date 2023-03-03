@@ -1,7 +1,6 @@
 package jant
 
 import (
-	"math"
 	"sync"
 	"sync/atomic"
 )
@@ -22,7 +21,7 @@ type Pool struct {
 func NewPool(size int, processCount int) *Pool {
 	p := &Pool{
 		capacity:     int32(size),
-		tasks:        make(chan f, math.MaxInt32),
+		tasks:        make(chan f, 1000),
 		destroy:      make(chan sig, processCount),
 		workers:      make(chan *Worker, size),
 		processCount: processCount,
