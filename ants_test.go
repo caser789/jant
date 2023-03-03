@@ -12,7 +12,7 @@ func TestPush(t *testing.T) {
 }
 
 func TestSize(t *testing.T) {
-	assert.Equal(t, int(defaultPool.Size()), Size())
+	assert.Equal(t, int(defaultPool.Running()), Size())
 }
 
 func TestCapacity(t *testing.T) {

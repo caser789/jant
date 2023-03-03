@@ -14,7 +14,7 @@ func Push(task f) error {
 }
 
 func Size() int {
-	return int(defaultPool.Size())
+	return int(defaultPool.Running())
 }
 
 func Cap() int {

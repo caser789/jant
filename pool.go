@@ -11,7 +11,7 @@ type f func()
 
 type Pool struct {
 	tasks        chan f
-	length       int32
+	running      int32
 	capacity     int32
 	workers      chan *Worker
 	destroy      chan sig
@@ -40,8 +40,12 @@ func (p *Pool) Push(task f) error {
 	return nil
 }
 
-func (p *Pool) Size() int32 {
-	return atomic.LoadInt32(&p.length)
+func (p *Pool) Running() int32 {
+	return atomic.LoadInt32(&p.running)
+}
+
+func (p *Pool) Free() int32 {
+	return atomic.LoadInt32(&p.capacity) - atomic.LoadInt32(&p.running)
 }
 
 func (p *Pool) Cap() int32 {
@@ -74,7 +78,7 @@ func (p *Pool) loop() {
 }
 
 func (p *Pool) reachLimit() bool {
-	return p.Size() >= p.Cap()
+	return p.Running() >= p.Cap()
 }
 
 func (p *Pool) newWorker() *Worker {
@@ -84,18 +88,18 @@ func (p *Pool) newWorker() *Worker {
 		exit:  make(chan sig),
 	}
 	worker.Run()
-	atomic.AddInt32(&p.length, 1)
-	p.workers <- worker
+	atomic.AddInt32(&p.running, 1)
 	return worker
 }
 
 func (p *Pool) getWorker() *Worker {
 	var worker *Worker
-	if p.reachLimit() {
-		worker = <-p.workers
-		return worker
+	if !p.reachLimit() {
+		return p.newWorker()
 	}
 
-	worker = p.newWorker()
-	return worker
+	select {
+	case worker = <-p.workers:
+		return worker
+	}
 }
