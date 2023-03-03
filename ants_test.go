@@ -1,15 +1,16 @@
 package jant_test
 
 import (
-	"github.com/caser789/jant"
 	"runtime"
 	"testing"
+
+	"github.com/caser789/jant"
 )
 
 var n = 100000
 
 func demoFunc() {
-	for i := 0; i < 10000000; i++ {
+	for i := 0; i < 1000000; i++ {
 	}
 }
 
@@ -21,6 +22,8 @@ func TestDefaultPool(t *testing.T) {
 	t.Logf("pool capacity:%d", jant.Cap())
 	t.Logf("running workers:%d", jant.Running())
 	t.Logf("free workers:%d", jant.Free())
+
+	// jant.Wait()
 
 	mem := runtime.MemStats{}
 	runtime.ReadMemStats(&mem)

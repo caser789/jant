@@ -1,6 +1,7 @@
 package jant
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
 )
@@ -9,22 +10,29 @@ type sig struct{}
 type f func()
 
 type Pool struct {
-	tasks        chan f
-	running      int32
 	capacity     int32
-	workers      chan *Worker
+	running      int32
+	tasks        *ConcurrentQueue
+	workers      *ConcurrentQueue
+	freeSignal   chan sig
+	launchSignal chan sig
 	destroy      chan sig
-	m            sync.Mutex
 	processCount int
+	m            *sync.Mutex
+	// wg           *sync.WaitGroup
 }
 
 func NewPool(size int, processCount int) *Pool {
 	p := &Pool{
 		capacity:     int32(size),
-		tasks:        make(chan f, 1000),
-		destroy:      make(chan sig, processCount),
-		workers:      make(chan *Worker, size),
 		processCount: processCount,
+		tasks:        NewConcurrentQueue(),
+		workers:      NewConcurrentQueue(),
+		freeSignal:   make(chan sig, math.MaxInt32),
+		launchSignal: make(chan sig, math.MaxInt32),
+		destroy:      make(chan sig, processCount),
+		// wg:           &sync.WaitGroup{},
+		m: &sync.Mutex{},
 	}
 	p.loop()
 	return p
@@ -35,9 +43,15 @@ func (p *Pool) Push(task f) error {
 		return nil
 	}
 
-	p.tasks <- task
+	p.tasks.push(task)
+	p.launchSignal <- sig{}
+	// p.wg.Add(1)
 	return nil
 }
+
+// func (p *Pool) Wait() {
+// 	p.wg.Wait()
+// }
 
 func (p *Pool) Running() int {
 	return int(atomic.LoadInt32(&p.running))
@@ -66,8 +80,8 @@ func (p *Pool) loop() {
 		go func() {
 			for {
 				select {
-				case task := <-p.tasks:
-					p.getWorker().sendTask(task)
+				case <-p.launchSignal:
+					p.getWorker().sendTask(p.tasks.pop().(f))
 				case <-p.destroy:
 					return
 				}
@@ -81,6 +95,11 @@ func (p *Pool) reachLimit() bool {
 }
 
 func (p *Pool) newWorker() *Worker {
+	if p.reachLimit() {
+		<-p.freeSignal
+		return p.getWorker()
+	}
+
 	worker := &Worker{
 		pool:  p,
 		tasks: make(chan f),
@@ -92,15 +111,16 @@ func (p *Pool) newWorker() *Worker {
 
 func (p *Pool) getWorker() *Worker {
 	defer atomic.AddInt32(&p.running, 1)
-	var worker *Worker
-	if p.reachLimit() {
-		return <-p.workers
+	if w := p.workers.pop(); w != nil {
+		return w.(*Worker)
 	}
 
-	select {
-	case worker = <-p.workers:
-		return worker
-	default:
-		return p.newWorker()
+	return p.newWorker()
+}
+
+func (p *Pool) PutWorker(w *Worker) {
+	p.workers.push(w)
+	if p.reachLimit() {
+		p.freeSignal <- sig{}
 	}
 }

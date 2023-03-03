@@ -24,3 +24,7 @@ func Cap() int {
 func Free() int {
 	return defaultPool.Free()
 }
+
+// func Wait() {
+// 	defaultPool.Wait()
+// }
