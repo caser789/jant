@@ -8,7 +8,7 @@ import (
 )
 
 type sig struct{}
-type f func()
+type f func() error
 
 // Pool accept the tasks from client,it will limit the total
 // of goroutines to a given number by recycling goroutines.
@@ -26,15 +26,11 @@ type Pool struct {
 	// workers is a slice that store the available workers.
 	workers []*Worker
 
-	// workerPool is a pool that saves a set of temporary objects.
-	workerPool sync.Pool
-
 	// release is used to notice the pool to closed itself.
 	release chan sig
-	// closed is used to confirm whether this pool has been closed.
-	closed int32
 
 	lock         sync.Mutex
+	once         sync.Once
 	processCount int
 }
 
@@ -53,14 +49,13 @@ func NewPool(size int, processCount int) (*Pool, error) {
 		capacity:     int32(size),
 		processCount: processCount,
 		freeSignal:   make(chan sig, math.MaxInt32),
-		release:      make(chan sig),
-		closed:       0,
+		release:      make(chan sig, 1),
 	}
 	return p, nil
 }
 
-func (p *Pool) Push(task f) error {
-	if atomic.LoadInt32(&p.closed) == 1 {
+func (p *Pool) Submit(task f) error {
+	if len(p.release) > 0 {
 		return ErrPoolClosed
 	}
 
@@ -82,10 +77,9 @@ func (p *Pool) Cap() int {
 }
 
 func (p *Pool) Release() error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	atomic.StoreInt32(&p.closed, 1)
-	close(p.release)
+	p.once.Do(func() {
+		p.release <- sig{}
+	})
 	return nil
 }
 
@@ -97,12 +91,15 @@ func (p *Pool) ReSize(size int) {
 func (p *Pool) getWorker() *Worker {
 	var w *Worker
 	waiting := false
+
 	p.lock.Lock()
 	workers := p.workers
 	n := len(workers) - 1
 	if n < 0 {
 		if p.running >= p.capacity {
 			waiting = true
+		} else {
+			p.running++
 		}
 	} else {
 		w = workers[n]
@@ -127,23 +124,17 @@ func (p *Pool) getWorker() *Worker {
 			p.lock.Unlock()
 			break
 		}
-	} else {
-		wp := p.workerPool.Get()
-		if wp == nil {
-			w = &Worker{
-				pool: p,
-			}
-			w.Run()
-			atomic.AddInt32(&p.running, 1)
-		} else {
-			w = wp.(*Worker)
+	} else if w == nil {
+		w = &Worker{
+			pool:  p,
+			tasks: make(chan f),
 		}
+		w.Run()
 	}
 	return w
 }
 
 func (p *Pool) putWorker(w *Worker) {
-	p.workerPool.Put(w)
 	p.lock.Lock()
 	p.workers = append(p.workers, w)
 	p.lock.Unlock()

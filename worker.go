@@ -10,7 +10,7 @@ type Worker struct {
 func (w *Worker) Run() {
 	go func() {
 		for ff := range w.tasks {
-			if ff == nil {
+			if ff == nil || len(w.pool.release) > 0 {
 				atomic.AddInt32(&w.pool.running, -1)
 				return
 			}

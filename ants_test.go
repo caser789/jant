@@ -8,22 +8,16 @@ import (
 	"github.com/caser789/jant"
 )
 
-var n = 10000000
-
-func demoFunc() {
-	var m int
-	for i := 0; i < 1000000; i++ {
-		m += i
-	}
-}
+var n = 1000000
 
 func TestDefaultPool(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
-		jant.Push(func() {
+		jant.Submit(func() error {
 			demoFunc()
 			wg.Done()
+			return nil
 		})
 	}
 	wg.Wait()
@@ -39,8 +33,8 @@ func TestNoPool(t *testing.T) {
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			demoFunc()
+			wg.Done()
 		}()
 	}
 	wg.Wait()
