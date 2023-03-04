@@ -1,6 +1,7 @@
 package jant
 
 import (
+	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -9,49 +10,64 @@ import (
 type sig struct{}
 type f func()
 
+// Pool accept the tasks from client,it will limit the total
+// of goroutines to a given number by recycling goroutines.
 type Pool struct {
-	capacity     int32
-	running      int32
-	tasks        *ConcurrentQueue
-	workers      *ConcurrentQueue
-	freeSignal   chan sig
-	launchSignal chan sig
-	destroy      chan sig
+	// capacity of the pool.
+	capacity int32
+
+	// running is the number of the currently running goroutines.
+	running int32
+
+	// signal is used to notice pool there are available
+	// workers which can be sent to work.
+	freeSignal chan sig
+
+	// workers is a slice that store the available workers.
+	workers []*Worker
+
+	// workerPool is a pool that saves a set of temporary objects.
+	workerPool sync.Pool
+
+	// release is used to notice the pool to closed itself.
+	release chan sig
+	// closed is used to confirm whether this pool has been closed.
+	closed int32
+
+	lock         sync.Mutex
 	processCount int
-	m            *sync.Mutex
-	// wg           *sync.WaitGroup
 }
 
-func NewPool(size int, processCount int) *Pool {
+// Errors for the Ants API
+var (
+	ErrPoolSizeInvalid = errors.New("invalid size for pool")
+	ErrPoolClosed      = errors.New("this pool has been closed")
+)
+
+func NewPool(size int, processCount int) (*Pool, error) {
+	if size <= 0 || processCount <= 0 {
+		return nil, ErrPoolSizeInvalid
+	}
+
 	p := &Pool{
 		capacity:     int32(size),
 		processCount: processCount,
-		tasks:        NewConcurrentQueue(),
-		workers:      NewConcurrentQueue(),
 		freeSignal:   make(chan sig, math.MaxInt32),
-		launchSignal: make(chan sig, math.MaxInt32),
-		destroy:      make(chan sig, processCount),
-		// wg:           &sync.WaitGroup{},
-		m: &sync.Mutex{},
+		release:      make(chan sig),
+		closed:       0,
 	}
-	p.loop()
-	return p
+	return p, nil
 }
 
 func (p *Pool) Push(task f) error {
-	if len(p.destroy) > 0 {
-		return nil
+	if atomic.LoadInt32(&p.closed) == 1 {
+		return ErrPoolClosed
 	}
 
-	p.tasks.push(task)
-	p.launchSignal <- sig{}
-	// p.wg.Add(1)
+	w := p.getWorker()
+	w.sendTask(task)
 	return nil
 }
-
-// func (p *Pool) Wait() {
-// 	p.wg.Wait()
-// }
 
 func (p *Pool) Running() int {
 	return int(atomic.LoadInt32(&p.running))
@@ -65,62 +81,71 @@ func (p *Pool) Cap() int {
 	return int(atomic.LoadInt32(&p.capacity))
 }
 
-func (p *Pool) Destroy() error {
-	p.m.Lock()
-	defer p.m.Unlock()
-
-	for i := 0; i < p.processCount+1; i++ {
-		p.destroy <- sig{}
-	}
+func (p *Pool) Release() error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	atomic.StoreInt32(&p.closed, 1)
+	close(p.release)
 	return nil
 }
 
-func (p *Pool) loop() {
-	for i := 0; i < p.processCount; i++ {
-		go func() {
-			for {
-				select {
-				case <-p.launchSignal:
-					p.getWorker().sendTask(p.tasks.pop().(f))
-				case <-p.destroy:
-					return
-				}
-			}
-		}()
-	}
-}
-
-func (p *Pool) reachLimit() bool {
-	return p.Running() >= p.Cap()
-}
-
-func (p *Pool) newWorker() *Worker {
-	if p.reachLimit() {
-		<-p.freeSignal
-		return p.getWorker()
-	}
-
-	worker := &Worker{
-		pool:  p,
-		tasks: make(chan f),
-		exit:  make(chan sig),
-	}
-	worker.Run()
-	return worker
+// ReSize change the capacity of this pool
+func (p *Pool) ReSize(size int) {
+	atomic.StoreInt32(&p.capacity, int32(size))
 }
 
 func (p *Pool) getWorker() *Worker {
-	defer atomic.AddInt32(&p.running, 1)
-	if w := p.workers.pop(); w != nil {
-		return w.(*Worker)
+	var w *Worker
+	waiting := false
+	p.lock.Lock()
+	workers := p.workers
+	n := len(workers) - 1
+	if n < 0 {
+		if p.running >= p.capacity {
+			waiting = true
+		}
+	} else {
+		w = workers[n]
+		workers[n] = nil
+		p.workers = workers[:n]
 	}
+	p.lock.Unlock()
 
-	return p.newWorker()
+	if waiting {
+		<-p.freeSignal
+		for {
+			p.lock.Lock()
+			workers = p.workers
+			n = len(workers) - 1
+			if n < 0 {
+				p.lock.Unlock()
+				continue
+			}
+			w = workers[n]
+			workers[n] = nil
+			p.workers = workers[:n]
+			p.lock.Unlock()
+			break
+		}
+	} else {
+		wp := p.workerPool.Get()
+		if wp == nil {
+			w = &Worker{
+				pool: p,
+			}
+			w.Run()
+			atomic.AddInt32(&p.running, 1)
+		} else {
+			w = wp.(*Worker)
+		}
+	}
+	return w
 }
 
-func (p *Pool) PutWorker(w *Worker) {
-	p.workers.push(w)
-	if p.reachLimit() {
-		p.freeSignal <- sig{}
-	}
+func (p *Pool) putWorker(w *Worker) {
+	p.workerPool.Put(w)
+	p.lock.Lock()
+	p.workers = append(p.workers, w)
+	p.lock.Unlock()
+	p.freeSignal <- sig{}
 }

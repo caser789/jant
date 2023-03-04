@@ -4,28 +4,24 @@ import "sync/atomic"
 
 type Worker struct {
 	pool  *Pool
-	exit  chan sig
 	tasks chan f
 }
 
 func (w *Worker) Run() {
 	go func() {
-		for {
-			select {
-			case x := <-w.tasks:
-				x()
-				w.pool.workers.push(w)
-				// w.pool.wg.Done()
-			case <-w.exit:
+		for ff := range w.tasks {
+			if ff == nil {
 				atomic.AddInt32(&w.pool.running, -1)
 				return
 			}
+			ff()
+			w.pool.putWorker(w)
 		}
 	}()
 }
 
 func (w *Worker) Stop() {
-	w.exit <- sig{}
+	w.tasks <- nil
 }
 
 func (w *Worker) sendTask(task f) {

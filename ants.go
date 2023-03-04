@@ -1,13 +1,12 @@
 package jant
 
 import (
-	"math"
 	"runtime"
 )
 
-const DEFAULT_POOL_SIZE = math.MaxInt32
+const DEFAULT_POOL_SIZE = 50000
 
-var defaultPool = NewPool(DEFAULT_POOL_SIZE, runtime.GOMAXPROCS(-1))
+var defaultPool, _ = NewPool(DEFAULT_POOL_SIZE, runtime.GOMAXPROCS(-1))
 
 func Push(task f) error {
 	return defaultPool.Push(task)
@@ -25,6 +24,6 @@ func Free() int {
 	return defaultPool.Free()
 }
 
-// func Wait() {
-// 	defaultPool.Wait()
-// }
+func Release() {
+	defaultPool.Release()
+}

@@ -2,54 +2,50 @@ package jant_test
 
 import (
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/caser789/jant"
 )
 
-var n = 100000
+var n = 10000000
 
 func demoFunc() {
+	var m int
 	for i := 0; i < 1000000; i++ {
+		m += i
 	}
 }
 
 func TestDefaultPool(t *testing.T) {
+	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
-		jant.Push(demoFunc)
+		wg.Add(1)
+		jant.Push(func() {
+			demoFunc()
+			wg.Done()
+		})
 	}
+	wg.Wait()
 
-	t.Logf("pool capacity:%d", jant.Cap())
-	t.Logf("running workers:%d", jant.Running())
-	t.Logf("free workers:%d", jant.Free())
-
-	// jant.Wait()
-
+	t.Logf("running workers number:%d", jant.Running())
 	mem := runtime.MemStats{}
 	runtime.ReadMemStats(&mem)
 	t.Logf("memory usage:%d", mem.TotalAlloc/1024)
 }
 
 func TestNoPool(t *testing.T) {
+	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
-		go demoFunc()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			demoFunc()
+		}()
 	}
+	wg.Wait()
 
 	mem := runtime.MemStats{}
 	runtime.ReadMemStats(&mem)
 	t.Logf("memory usage:%d", mem.TotalAlloc/1024)
-}
-
-func TestCustomPool(t *testing.T) {
-	p := jant.NewPool(1000, 100)
-	for i := 0; i < n; i++ {
-		p.Push(demoFunc)
-	}
-
-	t.Logf("pool capacity:%d", p.Cap())
-	t.Logf("running workers number:%d", p.Running())
-	t.Logf("free workers number:%d", p.Free())
-
-	mem := runtime.MemStats{}
-	runtime.ReadMemStats(&mem)
 }
