@@ -20,7 +20,7 @@ type WorkerWithFunc struct {
 func (w *WorkerWithFunc) run() {
 	go func() {
 		for args := range w.args {
-			if args == nil || len(w.pool.release) > 0 {
+			if args == nil {
 				atomic.AddInt32(&w.pool.running, -1)
 				return
 			}

@@ -79,12 +79,26 @@ func (p *Pool) Cap() int {
 func (p *Pool) Release() error {
 	p.once.Do(func() {
 		p.release <- sig{}
+		running := p.Running()
+		for i := 0; i < running; i++ {
+			p.getWorker().Stop()
+		}
 	})
 	return nil
 }
 
 // ReSize change the capacity of this pool
 func (p *Pool) ReSize(size int) {
+	if size == p.Cap() {
+		return
+	}
+
+	if size < p.Cap() {
+		diff := p.Cap() - size
+		for i := 0; i < diff; i++ {
+			p.getWorker().Stop()
+		}
+	}
 	atomic.StoreInt32(&p.capacity, int32(size))
 }
 
@@ -102,6 +116,7 @@ func (p *Pool) getWorker() *Worker {
 			p.running++
 		}
 	} else {
+		<-p.freeSignal
 		w = workers[n]
 		workers[n] = nil
 		p.workers = workers[:n]
@@ -110,20 +125,13 @@ func (p *Pool) getWorker() *Worker {
 
 	if waiting {
 		<-p.freeSignal
-		for {
-			p.lock.Lock()
-			workers = p.workers
-			n = len(workers) - 1
-			if n < 0 {
-				p.lock.Unlock()
-				continue
-			}
-			w = workers[n]
-			workers[n] = nil
-			p.workers = workers[:n]
-			p.lock.Unlock()
-			break
-		}
+		p.lock.Lock()
+		workers = p.workers
+		n = len(workers) - 1
+		w = workers[n]
+		workers[n] = nil
+		p.workers = workers[:n]
+		p.lock.Unlock()
 	} else if w == nil {
 		w = &Worker{
 			pool:  p,

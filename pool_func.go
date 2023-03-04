@@ -81,12 +81,26 @@ func (p *PoolWithFunc) Cap() int {
 func (p *PoolWithFunc) Release() error {
 	p.once.Do(func() {
 		p.release <- sig{}
+		running := p.Running()
+		for i := 0; i < running; i++ {
+			p.getWorker().stop()
+		}
 	})
 	return nil
 }
 
 // ReSize change the capacity of this pool
 func (p *PoolWithFunc) ReSize(size int) {
+	if size == p.Cap() {
+		return
+	}
+
+	if size < p.Cap() {
+		diff := p.Cap() - size
+		for i := 0; i < diff; i++ {
+			p.getWorker().stop()
+		}
+	}
 	atomic.StoreInt32(&p.capacity, int32(size))
 }
 
